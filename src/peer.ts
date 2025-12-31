@@ -233,6 +233,34 @@ export default class Peer {
           srtpParameters: response.srtpParameters! as unknown as SrtpParameters,
         });
 
+        const consumerResult = await this.startConsumingRemotePipeTransport({
+          producerId,
+          rtpCapabilities,
+          serverIp: producer.serverIp,
+          pipeTransportId: response.pipeTransportId,
+        });
+
+        await localPipeTransport.produce({
+          id: producer.producerId,
+          kind: consumerResult.kind,
+          rtpParameters: consumerResult.rtpParameters,
+          paused: consumerResult.producerPaused,
+        });
+
+        // localPipeTransport.observer.on('close', () => {
+        //   remotePipeTransport.close();
+        //   this.#mapRouterPairPipeTransportPairPromise.delete(
+        //     pipeTransportPairKey
+        //   );
+        // });
+
+        // remotePipeTransport.observer.on('close', () => {
+        //   localPipeTransport.close();
+        //   this.#mapRouterPairPipeTransportPairPromise.delete(
+        //     pipeTransportPairKey
+        //   );
+        // });
+
         try {
           consumer = await consumerTransport.consume({
             producerId,
@@ -240,7 +268,10 @@ export default class Peer {
             paused: false,
           });
         } catch (error) {
-          console.error("Consume failed during piping to local router", error);
+          console.error(
+            "Consume failed during piping to local router different machine",
+            error
+          );
           return;
         }
 
@@ -481,32 +512,77 @@ export default class Peer {
     localAddress: string;
     localPort: number;
     srtpParameters: SrtpParameters;
+    pipeTransportId: string;
   }> {
     const requestId = randomUUID();
 
     return await new Promise((resolve, reject) => {
       this.room.subscriber.subscribe(requestId, (data) => {
+        const timeout = setTimeout(() => {
+          this.room.subscriber.unsubscribe(requestId);
+          console.error("Error creating remote pipe transport", { requestId });
+          reject(new Error("Error creating remote pipe transport"));
+        }, 5000);
+
         const parsed = JSON.parse(data);
+        console.log("parsed", parsed);
+        if (timeout) {
+          clearTimeout(timeout);
+        }
         resolve(
           parsed as {
             localAddress: string;
             localPort: number;
             srtpParameters: SrtpParameters;
+            pipeTransportId: string;
           }
         );
         this.room.subscriber.unsubscribe(requestId);
       });
 
-      setTimeout(() => {
-        this.room.subscriber.unsubscribe(requestId);
-        console.error("Error creating remote pipe transport", { requestId });
-        reject(new Error("Error creating remote pipe transport"));
-      }, 5000);
-
       this.room.publisher.publish(
         data.serverIp,
         JSON.stringify({
           event: RedisRoomEvent.CreateRemotePipeTransport,
+          data: {
+            ...data,
+            requestId,
+          },
+        })
+      );
+    });
+  }
+
+  private async startConsumingRemotePipeTransport(data: {
+    producerId: string;
+    rtpCapabilities: RtpCapabilities;
+    serverIp: string;
+    pipeTransportId: string;
+  }): Promise<{
+    kind: MediaKind;
+    rtpParameters: RtpParameters;
+    producerPaused: boolean;
+  }> {
+    const requestId = randomUUID();
+
+    return await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.room.subscriber.unsubscribe(requestId);
+        console.error("Error starting consuming remote pipe transport", {
+          requestId,
+        });
+        reject(new Error("Error starting consuming remote pipe transport"));
+      }, 5000);
+      this.room.subscriber.subscribe(requestId, (data) => {
+        clearTimeout(timeout);
+        const parsed = JSON.parse(data);
+        resolve(parsed);
+      });
+
+      this.room.publisher.publish(
+        data.serverIp,
+        JSON.stringify({
+          event: RedisRoomEvent.PipeTransportStartConsuming,
           data: {
             ...data,
             requestId,

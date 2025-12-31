@@ -9,6 +9,10 @@ import { RedisRoomEvent, RoomDetails } from "./types";
 import Room, { roomList } from "./room";
 import Peer, { getPeer } from "./peer";
 import { SrtpParameters } from "mediasoup/node/lib/srtpParametersTypes";
+import { Transport } from "mediasoup/node/lib/TransportTypes";
+import { RtpCapabilities } from "mediasoup/node/lib/rtpParametersTypes";
+
+const pipeTransportMap = new Map<string, Transport>();
 
 const main = async () => {
   await createWorkers();
@@ -83,6 +87,9 @@ const main = async () => {
                     config.mediasoup.webRtcTransport.listenIps[0].announcedIp,
                 },
               });
+
+              pipeTransportMap.set(transport.id, transport);
+
               transport.connect({
                 ip: localAddress,
                 port: localPort,
@@ -95,8 +102,46 @@ const main = async () => {
                   localAddress: transport.tuple.localAddress,
                   localPort: transport.tuple.localPort,
                   srtpParameters: transport.srtpParameters,
+                  pipeTransportId: transport.id,
                 })
               );
+            }
+
+            if (parsed.event === RedisRoomEvent.PipeTransportStartConsuming) {
+              const {
+                producerId,
+                pipeTransportId,
+                rtpCapabilities,
+                requestId,
+              } = parsed.data as {
+                producerId: string;
+                pipeTransportId: string;
+                rtpCapabilities: RtpCapabilities;
+                requestId: string;
+              };
+              const transport = pipeTransportMap.get(pipeTransportId);
+              if (!transport) {
+                console.error("Transport not found", { pipeTransportId });
+                return;
+              }
+              try {
+                const consumer = await transport.consume({
+                  producerId,
+                  rtpCapabilities,
+                  paused: false,
+                });
+                publisher.publish(
+                  requestId,
+                  JSON.stringify({
+                    success: true,
+                    producerPaused: consumer.producerPaused,
+                    rtpParameters: consumer.rtpParameters,
+                    kind: consumer.kind,
+                  })
+                );
+              } catch (error) {
+                console.error("Error starting consuming", { requestId }, error);
+              }
             }
           }
         );
