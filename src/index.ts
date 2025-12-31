@@ -8,6 +8,7 @@ import { config } from "./config";
 import { RedisRoomEvent, RoomDetails } from "./types";
 import Room, { roomList } from "./room";
 import Peer, { getPeer } from "./peer";
+import { SrtpParameters } from "mediasoup/node/lib/srtpParametersTypes";
 
 const main = async () => {
   await createWorkers();
@@ -41,15 +42,76 @@ const main = async () => {
             io.to(createRedisRoomId(roomId)).emit(RedisRoomEvent.NewProducer);
           }
         });
-        // TODO: This is no longer distributed, fix it
-        await publisher.set(
-          createRedisRoomId(roomId),
-          JSON.stringify({
-            id: roomId,
-            producingPeers: [],
-            currentSpeakers: [],
-          })
+
+        subscriber.subscribe(
+          config.mediasoup.webRtcTransport.listenIps[0].announcedIp,
+          async (data) => {
+            const parsed = JSON.parse(data) as {
+              event: RedisRoomEvent;
+              data: unknown;
+            };
+            if (parsed.event === RedisRoomEvent.CreateRemotePipeTransport) {
+              const {
+                routerId,
+                requestId,
+                localAddress,
+                localPort,
+                srtpParameters,
+              } = parsed.data as {
+                routerId: string;
+                requestId: string;
+                localAddress: string;
+                localPort: number;
+                srtpParameters: SrtpParameters;
+              };
+              const router = routers.find(
+                (router) => router.router.id === routerId
+              );
+              if (!router) {
+                console.error("Router not found", { routerId, requestId });
+                return;
+              }
+              const transport = await router.router.createPipeTransport({
+                enableSctp: true,
+                numSctpStreams: { OS: 1024, MIS: 1024 },
+                enableRtx: false,
+                enableSrtp: false,
+                listenInfo: {
+                  protocol: "udp",
+                  ip: config.mediasoup.webRtcTransport.listenIps[0].ip,
+                  announcedAddress:
+                    config.mediasoup.webRtcTransport.listenIps[0].announcedIp,
+                },
+              });
+              transport.connect({
+                ip: localAddress,
+                port: localPort,
+                srtpParameters: srtpParameters as unknown as SrtpParameters,
+              });
+
+              publisher.publish(
+                requestId,
+                JSON.stringify({
+                  localAddress: transport.tuple.localAddress,
+                  localPort: transport.tuple.localPort,
+                  srtpParameters: transport.srtpParameters,
+                })
+              );
+            }
+          }
         );
+
+        const existingRoom = await publisher.get(createRedisRoomId(roomId));
+        if (!existingRoom) {
+          await publisher.set(
+            createRedisRoomId(roomId),
+            JSON.stringify({
+              id: roomId,
+              producingPeers: [],
+              currentSpeakers: [],
+            })
+          );
+        }
 
         callback(roomId);
       }
@@ -62,6 +124,7 @@ const main = async () => {
       });
 
       if (!roomList.has(roomId)) {
+        console.log("Room does not exist");
         return cb({
           error: "Room does not exist",
         });

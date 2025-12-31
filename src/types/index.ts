@@ -19,6 +19,7 @@ export interface RoomDetails {
 
 export enum RedisRoomEvent {
   NewProducer = "newProducer",
+  CreateRemotePipeTransport = "createRemotePipeTransport",
 }
 
 export type RouterInfo = {

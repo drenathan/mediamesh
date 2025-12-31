@@ -1,7 +1,7 @@
 import { createClient } from "redis";
 
 const publisher = createClient({
-  url: process.env.REDIS_URL,
+  pingInterval: 5000,
 });
 
 const subscriber = publisher.duplicate();

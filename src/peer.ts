@@ -15,9 +15,10 @@ import { config } from "./config";
 import { Server } from "socket.io";
 import Room from "./room";
 import { createRedisRoomId } from "./utils";
-import { RoomDetails, RouterInfo } from "./types";
+import { RedisRoomEvent, RoomDetails, RouterInfo } from "./types";
 import { isEmpty } from "lodash";
 import { createRemotePipeTransport } from "./grpcServer";
+import { randomUUID } from "crypto";
 
 export default class Peer {
   transports: Map<string, Transport> = new Map();
@@ -182,6 +183,7 @@ export default class Peer {
         console.error("Producer router not found", { producerId });
         return;
       }
+
       await producerRouter.router.pipeToRouter({
         producerId,
         router: this.router,
@@ -213,12 +215,14 @@ export default class Peer {
       });
 
       try {
-        const response = await createRemotePipeTransport(producer.serverIp, {
-          srtpParameters: localPipeTransport.srtpParameters,
+        const response = await this.createRemotePipeTransport({
+          srtpParameters: localPipeTransport.srtpParameters!,
           localAddress: localPipeTransport.tuple.localAddress,
           localPort: localPipeTransport.tuple.localPort,
           routerId: producer.routerId,
+          serverIp: producer.serverIp,
         });
+
         if (!response) {
           throw "Failed to create remote pipe transport";
         }
@@ -228,20 +232,6 @@ export default class Peer {
           port: response.localPort!,
           srtpParameters: response.srtpParameters! as unknown as SrtpParameters,
         });
-
-        // After we have connected to the remote one, we need to tell remote to start consuming and return the consumer
-
-        let pipeConsumer = {} as Consumer;
-
-        const localProducer = await localPipeTransport.produce({
-          id: producer.producerId,
-          kind: pipeConsumer.kind,
-          rtpParameters: pipeConsumer.rtpParameters,
-          paused: pipeConsumer.producerPaused,
-        });
-
-        // now we can consume locally using our consumer transport
-        // since pipe transport is producing into the same router
 
         try {
           consumer = await consumerTransport.consume({
@@ -479,6 +469,51 @@ export default class Peer {
     });
 
     return params;
+  }
+
+  private async createRemotePipeTransport(data: {
+    srtpParameters: SrtpParameters;
+    localAddress: string;
+    localPort: number;
+    routerId: string;
+    serverIp: string;
+  }): Promise<{
+    localAddress: string;
+    localPort: number;
+    srtpParameters: SrtpParameters;
+  }> {
+    const requestId = randomUUID();
+
+    return await new Promise((resolve, reject) => {
+      this.room.subscriber.subscribe(requestId, (data) => {
+        const parsed = JSON.parse(data);
+        resolve(
+          parsed as {
+            localAddress: string;
+            localPort: number;
+            srtpParameters: SrtpParameters;
+          }
+        );
+        this.room.subscriber.unsubscribe(requestId);
+      });
+
+      setTimeout(() => {
+        this.room.subscriber.unsubscribe(requestId);
+        console.error("Error creating remote pipe transport", { requestId });
+        reject(new Error("Error creating remote pipe transport"));
+      }, 5000);
+
+      this.room.publisher.publish(
+        data.serverIp,
+        JSON.stringify({
+          event: RedisRoomEvent.CreateRemotePipeTransport,
+          data: {
+            ...data,
+            requestId,
+          },
+        })
+      );
+    });
   }
 }
 
