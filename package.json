@@ -1,15 +1,28 @@
 {
   "name": "mediasoupx",
-  "module": "index.ts",
-  "type": "module",
-  "private": true,
+  "version": "0.0.1",
+  "main": "index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only ./src/index.ts",
+    "proto-gen": "./proto-gen.sh",
+    "build": "rimraf ./build && tsc"
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/express": "^5.0.6",
+    "@types/lodash": "^4.17.21",
+    "ts-node-dev": "^2.0.0"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
-    "mediasoup": "^3.19.14"
+    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/proto-loader": "^0.8.0",
+    "express": "^5.2.1",
+    "lodash": "^4.17.21",
+    "mediasoup": "^3.19.14",
+    "redis": "^5.10.0",
+    "socket.io": "^4.8.3"
   }
 }

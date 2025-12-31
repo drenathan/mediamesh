@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package transportPackage;
+
+message Response {
+    string localAddress = 1;
+    int32 localPort = 2;
+    optional SrtpParameters srtpParameters = 3;
+}
+
+message Param {
+    string routerId = 1;
+    string localAddress = 2;
+    int32 localPort = 3;
+    optional SrtpParameters srtpParameters = 4;
+}
+
+message SrtpParameters {
+    string cryptoSuite = 1;
+    string keyBase64 = 2;
+}
+
+
+service Transport {
+    rpc CreatePipeTransport(Param) returns (Response) {}
+}
